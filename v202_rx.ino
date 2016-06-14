@@ -1,6 +1,6 @@
 /* v202_rx.ino -- An arduino sketch to test the protocol v202
  *
- * Copyright (C) 2014 execuc
+ * Copyright (C) 2016 execuc
  *
  * This software may be modified and distributed under the terms
  * of the MIT license.  See the LICENSE file for details.
@@ -58,12 +58,17 @@ void loop()
       Serial.print("\t"); Serial.print(rxValues.trim_yaw);
       Serial.print("\t"); Serial.print(rxValues.trim_pitch);
       Serial.print("\t"); Serial.print(rxValues.trim_roll);
-      Serial.print("\t"); Serial.println(rxValues.flags);
+      Serial.print("\t"); Serial.print(rxValues.flags);
+      Serial.print("\t"); Serial.println(rxValues.crc);
       //time = newTime;
     break;
     
     case BOUND_NO_VALUES:
       //Serial.print(newTime - time); Serial.println(" : ----"); // 32ms for 16Mhz
+    break;
+
+    case ERROR_SIGNAL_LOST:
+	//Serial.print(newTime - time); Serial.println(" : ----")
     break;
     
     default:

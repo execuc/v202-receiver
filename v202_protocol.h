@@ -1,6 +1,6 @@
 /* v202_protocol.h -- Handle the v202 protocol.
  *
- * Copyright (C) 2014 execuc
+ * Copyright (C) 2016 execuc
  *
  * This software may be modified and distributed under the terms
  * of the MIT license.  See the LICENSE file for details.
@@ -22,6 +22,7 @@ typedef struct __attribute__((__packed__)) {
   int8_t trim_pitch;
   int8_t trim_roll;
   uint8_t flags;
+  uint8_t crc;
 } rx_values_t;
 
 
@@ -64,6 +65,8 @@ protected:
   uint8_t mRfChNum;
   uint8_t mFrame[16];
   uint8_t mState;
+  uint8_t mErrorTimeoutCode;
+  uint16_t mTimeout;
   unsigned long mLastSignalTime;
 };
 #endif /* V202_PROTOCOL_H_ */

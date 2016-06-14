@@ -81,10 +81,9 @@ Improvements
  There are many improvements to do :
  
   * Make more reliable code, first.
-  * Handle missing frame : for each frequency, transmitter send two frames in 8 ms. If there are lost, received will wait 16 frequency switching * 8ms to get frame. It would be interesting to jump some frequencies to retrieve the channel switching faster.
   * Handle signal lost : return to initial state for example.
   * Make a better state machine for this protocol with a re-factor of the code and a smaller footprint.
-  * Reduce execution time. State machine takes 120ms when a frame arrived and 32ms when there are nothing to do.
+  * Reduce execution time. State machine takes 120us when a frame arrived and 32ms when there are nothing to do.
   * Implement this protocol in the multiwii project, if it useful.
   * Make an arduino example with some RC servos.
 
