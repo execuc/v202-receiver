@@ -1,12 +1,18 @@
 /* v202_protocol.cpp -- Handle the v202 protocol.
  *
- * Copyright (C) 2014 execuc
+ * Copyright (C) 2016 execuc
  *
  * This software may be modified and distributed under the terms
  * of the MIT license.  See the LICENSE file for details.
  */
 
 #include "v202_protocol.h"
+
+const uint16_t NORMAL_TIMEOUT = 11;
+const uint8_t ERROR_JUMP_FREQ = 1;
+const uint8_t ERROR_WAIT_PREV_FREQ = 2;
+const uint8_t ERROR_WAIT_ONE_FREQ = 3;
+const uint8_t NO_ERROR = 0;
 
 /*****************************************************************/
 /*	
@@ -49,6 +55,8 @@ v202Protocol::v202Protocol()
   mTxid[0]=0;
   mTxid[1]=0;
   mTxid[2]=0;
+  mTimeout = 9999;
+  mErrorTimeoutCode = NO_ERROR;
   
   // Populate frequency for binding
   // 0x18 channel is present for the 4 frequencies hopping pattern
@@ -91,68 +99,107 @@ void v202Protocol::init(nrf24l01p *wireless)
 uint8_t v202Protocol::run( rx_values_t *rx_value )
 {
   uint8_t returnValue = UNKNOWN;
-  static uint8_t errorCnt = 0;
   switch(mState)
   {
     case BOUND:
     {
-      unsigned long newTime = millis();
+      bool incrementChannel = false;
       returnValue = BOUND_NO_VALUES;
+      unsigned long newTime = millis();
       if( mWireless->rxFlag() )
       {
-        bool incrementChannel = false;
         mWireless->resetRxFlag();
+        
+	      uint8_t lastCRC = 0;
         while ( !mWireless->rxEmpty() )
         {
           mWireless->readPayload(mFrame, 16);
+
           if( checkCRC() && checkTXaddr() )
           {
-            // a valid frame has been received
-            incrementChannel = true;
-            errorCnt = 0;
-            // Discard bind frame
-            if( mFrame[14] != 0xc0 )
-            {
-              // Extract values
-              returnValue = BOUND_NEW_VALUES;
-              rx_value->throttle = mFrame[0];
-              rx_value->yaw = mFrame[1] < 0x80 ? -mFrame[1] :  mFrame[1] - 0x80;
-              rx_value->pitch = mFrame[2] < 0x80 ? -mFrame[2] :  mFrame[2] - 0x80;
-              rx_value->roll = mFrame[3] < 0x80 ? -mFrame[3] :  mFrame[3] - 0x80;
-              rx_value->trim_yaw = mFrame[4] - 0x40;
-              rx_value->trim_pitch = mFrame[5] - 0x40;
-              rx_value->trim_roll = mFrame[6] - 0x40;
-              rx_value->flags = mFrame[14];
-            }
+	          if(incrementChannel && lastCRC == mFrame[15])
+			        continue;
+
+        		if(!incrementChannel)
+        		{
+        		  mRfChNum++;
+        		  if( mRfChNum > 15) 
+        		    mRfChNum = 0;
+        		  mWireless->switchFreq(mRfChannels[mRfChNum]);
+        		 incrementChannel =true;
+        		 mTimeout = NORMAL_TIMEOUT;
+        		 mErrorTimeoutCode = NO_ERROR;
+        		}
+
+		        lastCRC=mFrame[15];
+
+    		    //Serial.println(newTime - mLastSignalTime);
+    		    mLastSignalTime = newTime;
+    
+    		    // a valid frame has been received
+    		    //incrementChannel = true;
+    		    // Discard bind frame
+    		    if( mFrame[14] != 0xc0 )
+    		    {
+    		      // Extract values
+    		      returnValue = BOUND_NEW_VALUES;
+    		      rx_value->throttle = mFrame[0];
+    		      rx_value->yaw = mFrame[1] < 0x80 ? -mFrame[1] :  mFrame[1] - 0x80;
+    		      rx_value->pitch = mFrame[2] < 0x80 ? -mFrame[2] :  mFrame[2] - 0x80;
+    		      rx_value->roll = mFrame[3] < 0x80 ? -mFrame[3] :  mFrame[3] - 0x80;
+    		      rx_value->trim_yaw = mFrame[4] - 0x40;
+    		      rx_value->trim_pitch = mFrame[5] - 0x40;
+    		      rx_value->trim_roll = mFrame[6] - 0x40;
+    		      rx_value->flags = mFrame[14];
+    		      rx_value->crc = mFrame[15];
+    		    }
+
           }
+
         }
-        if(incrementChannel)
-        {
-          mRfChNum++;
-          if( mRfChNum > 15) 
-            mRfChNum = 0;
-          mWireless->switchFreq(mRfChannels[mRfChNum]);
-        }
-      }       
-      else if(errorCnt == 0 && (newTime - mLastSignalTime) > 10)
-        {
-          errorCnt++;
-          mLastSignalTime = newTime;
-          mRfChNum++;
-          if( mRfChNum > 15) 
-            mRfChNum = 0;
-          mWireless->switchFreq(mRfChannels[mRfChNum]);
-        }
-        else if( errorCnt >= 1 && (newTime - mLastSignalTime) > 140)
-        {
-          mLastSignalTime = newTime;
-          mRfChNum++;
-          if( mRfChNum > 15) 
-            mRfChNum = 0;
-          mWireless->switchFreq(mRfChannels[mRfChNum]);
-          
-        }
+      }
+
+      
+      if(incrementChannel == false && uint16_t(newTime - mLastSignalTime) > mTimeout)
+      {
+      	mErrorTimeoutCode++;
+
+      	mLastSignalTime = millis();
+        //Serial.print("e ");Serial.print(mRfChNum);Serial.print(" ");Serial.println(newTime - mLastSignalTime);
+      	uint8_t freq_jump =0;
+      	if(mErrorTimeoutCode == ERROR_JUMP_FREQ)
+      	{
+      		freq_jump  = uint16_t(newTime - mLastSignalTime) / 8 + 1;
+      		mTimeout = freq_jump * 8 + 6;
+		//Serial.print("1 ");
+      	}
+      	else if(mErrorTimeoutCode == ERROR_WAIT_PREV_FREQ)
+      	{
+      		freq_jump  = 10;
+      		mTimeout = 120;
+		//Serial.print("2 ");
+      	}
+      	else //if(mErrorTimeoutCode == ERROR_WAIT_ONE_FREQ)
+      	{
+      		freq_jump = random(1, 15);
+      		mTimeout = 250;
+		//Serial.print("3 ");
+      	}
         
+
+         mRfChNum+=freq_jump;
+          if( mRfChNum > 15) 
+            mRfChNum = mRfChNum % 16;
+          mWireless->switchFreq(mRfChannels[mRfChNum]);
+
+	   //Serial.print(mRfChNum);Serial.print(" ");Serial.println(mTimeout);
+      
+      }
+
+      if(mErrorTimeoutCode > 0)
+        returnValue = ERROR_SIGNAL_LOST;
+
+    
     }
     break;
     // Initial state
@@ -205,8 +252,6 @@ uint8_t v202Protocol::run( rx_values_t *rx_value )
     
     // Wait on the first frequency of TX
     case WAIT_FIRST_SYNCHRO:
-    {
-    unsigned long newTime = millis();
       returnValue = BIND_IN_PROGRESS;
       if( mWireless->rxFlag() )
       {
@@ -215,11 +260,10 @@ uint8_t v202Protocol::run( rx_values_t *rx_value )
         while ( !mWireless->rxEmpty() )
         {
           mWireless->readPayload(mFrame, 16);
-          if( checkCRC() )
+          if( checkCRC() && mFrame[14] != 0xc0 && checkTXaddr())
           {
             incrementChannel = true;
             mState = BOUND;
-            mLastSignalTime = newTime;
           }
         }
         
@@ -233,10 +277,9 @@ uint8_t v202Protocol::run( rx_values_t *rx_value )
         }
       }
     break;
-  }
     // Not implement for the moment
     case SIGNAL_LOST:
-      returnValue = BIND_IN_PROGRESS;
+      returnValue = ERROR_SIGNAL_LOST;
     break;
     
     default:
